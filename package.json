@@ -1,0 +1,20 @@
+{
+  "name": "exp-privacy-gate",
+  "version": "1.0.0",
+  "description": "Shopify Customer Privacy API gate to prevent scripts loading before consent.",
+  "main": "dist/exp_privacy_gate.js",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "terser": "^5.31.0"
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "clean": "node ./scripts/clean.mjs"
+  }
+}
