@@ -1,4 +1,4 @@
-# exp_privacy_gate (open source)
+# Shopify Privacy Gate
 
 Privacy gate for Shopify: **prevents download and execution** of scripts until the requested “processing purposes” are **Allowed** by the Customer Privacy API (which takes into account region, merchant settings, and user consent).
 
