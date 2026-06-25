@@ -10,8 +10,7 @@
 
   const state = {
     ran: new Set(),
-    booted: false,
-    lastEval: 0
+    booted: false
   }
 
   const readRan = () => {
@@ -227,19 +226,12 @@
   }
 
   const hookPrivacyChanges = () => {
+    // Re-scan when consent is collected/updated in the same tab
     document.addEventListener('visitorConsentCollected', () => scan())
-    let t = null
-    const tick = () => {
-      const now = Date.now()
-      if (now - state.lastEval > 1200) {
-        state.lastEval = now
-        scan()
-      }
-      t = window.setTimeout(tick, 1800)
-    }
-    tick()
-    window.addEventListener('beforeunload', () => {
-      if (t) window.clearTimeout(t)
+
+    // Re-scan when consent changes in another tab (sessionStorage/localStorage update)
+    window.addEventListener('storage', (e) => {
+      if (e.key && e.key.includes('consent')) scan()
     })
   }
 
