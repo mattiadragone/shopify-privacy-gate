@@ -45,9 +45,16 @@ Unknown purposes are rejected (no download/execution) and trigger an `exp_privac
 | `data-exp-privacy` | ✅ | — | One or more purposes required before execution |
 | `data-exp-src` | — | — | URL of the external script to load |
 | `data-exp-kind` | — | `classic` | Set to `module` to load via ESM `import()` |
-| `data-exp-once` | — | `1` | Set to `0` to allow re-execution on every scan |
+| `data-exp-once` | — | `1` | Set to `0` to allow re-execution on every scan (see caveat below) |
 | `data-exp-key` | — | auto | Manual deduplication key (overrides the auto-generated one) |
 | `data-exp-fallback` | — | — | CSS selector of an element to show while consent is not given |
+| `data-exp-integrity` | — | — | Subresource Integrity hash for the external script (classic only) |
+| `data-exp-crossorigin` | — | auto | CORS mode for the external script; defaults to `anonymous` when an integrity hash is set |
+
+> **`data-exp-once="0"` caveat:** re-execution on every scan applies to classic
+> scripts and inline bootstraps. ESM modules (`data-exp-kind="module"`) are
+> loaded with `import()`, which the browser caches by URL, so a module is only
+> evaluated once per URL regardless of this setting.
 
 ---
 
@@ -138,7 +145,11 @@ Show a message while analytics consent is not given. The fallback is hidden auto
 
 ## Events
 
-All events are published via `Shopify.analytics.publish` if available, otherwise POSTed to `/apps/exp/log`.
+All events are published via `Shopify.analytics.publish` if available, otherwise POSTed to `/apps/exp/log`. Override the fallback endpoint by setting `window.EXP_PRIVACY_GATE_LOG_URL` before the library boots:
+
+```html
+<script>window.EXP_PRIVACY_GATE_LOG_URL = '/apps/my-app/privacy-log'</script>
+```
 
 | Event | When |
 |---|---|
@@ -180,6 +191,33 @@ expPrivacyGate.scan()
 ```
 
 ---
+
+## Security notes
+
+### Subresource Integrity (SRI)
+
+For external classic scripts you can pin an integrity hash so a tampered CDN
+response is rejected by the browser:
+
+```html
+<script type="application/json"
+  data-exp-privacy="analytics"
+  data-exp-src="https://cdn.example.com/tracker.js"
+  data-exp-integrity="sha384-…"
+  data-exp-crossorigin="anonymous">
+</script>
+```
+
+SRI is not applied to ESM imports (`data-exp-kind="module"`), since `import()`
+does not support an integrity attribute.
+
+### Content Security Policy (CSP)
+
+The gate executes gated nodes by injecting `<script>` elements (external `src`
+for `data-exp-src`, and an inline `<script>` for inline bootstraps). If your
+store uses a strict CSP, make sure `script-src` allows the external origins you
+gate, and that inline bootstraps are permitted (e.g. via a nonce/hash or
+`'unsafe-inline'`) — otherwise the browser will block them.
 
 ## Dev / Build
 

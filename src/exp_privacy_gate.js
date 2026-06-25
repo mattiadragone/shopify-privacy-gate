@@ -6,7 +6,10 @@
   const ATTR_KIND = 'data-exp-kind'
   const ATTR_ONCE = 'data-exp-once'
   const ATTR_FALLBACK = 'data-exp-fallback'
+  const ATTR_INTEGRITY = 'data-exp-integrity'
+  const ATTR_CROSSORIGIN = 'data-exp-crossorigin'
   const DEFAULT_ONCE = '1'
+  const DEFAULT_LOG_URL = '/apps/exp/log'
 
   const ALLOWED_PURPOSES = new Set(['necessary', 'preferences', 'analytics', 'marketing', 'sale_of_data', 'saleofdata'])
 
@@ -39,7 +42,8 @@
       }
     } catch (_) {}
     try {
-      fetch('/apps/exp/log', {
+      const url = window.EXP_PRIVACY_GATE_LOG_URL || DEFAULT_LOG_URL
+      fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name, payload })
@@ -193,6 +197,13 @@
       const s = document.createElement('script')
       s.src = src
       s.async = true
+      const integrity = el.getAttribute(ATTR_INTEGRITY)
+      const crossorigin = el.getAttribute(ATTR_CROSSORIGIN)
+      if (integrity) s.integrity = integrity
+      // Subresource Integrity requires a CORS request; default to anonymous
+      // when an integrity hash is provided but no explicit mode is set.
+      if (crossorigin) s.crossOrigin = crossorigin
+      else if (integrity) s.crossOrigin = 'anonymous'
       s.onload = resolve
       s.onerror = reject
       document.head.appendChild(s)
