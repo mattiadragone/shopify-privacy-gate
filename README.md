@@ -52,6 +52,7 @@ Unknown purposes are rejected (no download/execution) and trigger an `exp_privac
 | `data-exp-crossorigin` | — | auto | CORS mode for the external script; defaults to `anonymous` when an integrity hash is set |
 | `data-exp-nonce` | — | — | CSP nonce applied to the injected `<script>` (script nodes only) |
 | `data-exp-reload-on-revoke` | — | — | Reload the page if consent is withdrawn after the node has run |
+| `data-exp-when` | — | immediate | Defer an allowed node: `idle`, `visible`, or `interaction` (see below) |
 
 > **`data-exp-once="0"` caveat:** re-execution on every scan applies to classic
 > scripts and inline bootstraps. ESM modules (`data-exp-kind="module"`) are
@@ -133,6 +134,27 @@ matters, add `data-exp-reload-on-revoke` so the page reloads on withdrawal:
 </script>
 ```
 
+### Deferred loading (`data-exp-when`)
+
+Once consent is granted you can still defer *when* a non-critical node runs, to
+keep it off the critical rendering path:
+
+- `idle` — run during browser idle time (`requestIdleCallback`, 3s timeout fallback)
+- `visible` — run when the element scrolls into view (`IntersectionObserver`). Only
+  meaningful for rendered elements such as `<iframe>`/`<img>`; a `<script>` tag has
+  no layout box and would never trigger.
+- `interaction` — run on the first user interaction (pointer, key, touch or scroll)
+
+```html
+<!-- Load the chat widget only when the visitor scrolls to it -->
+<iframe
+  data-exp-privacy="marketing"
+  data-exp-src="https://widget.example.com/chat"
+  data-exp-when="visible"></iframe>
+```
+
+If consent is withdrawn before a deferred node fires, it is silently skipped.
+
 ### Fallback element
 
 Show a message while analytics consent is not given. The fallback is hidden automatically once consent is granted.
@@ -203,6 +225,7 @@ All events are published via `Shopify.analytics.publish` if available, otherwise
 | `exp_privacy_gate_error` | A gated node threw an error during execution |
 | `exp_privacy_gate_invalid_purpose` | An unknown purpose was specified |
 | `exp_privacy_gate_revoked` | A previously-run node was torn down because consent was withdrawn |
+| `exp_privacy_gate_blocked` | A node is blocked for lack of consent (emitted once per blocked episode) |
 
 ---
 
@@ -220,6 +243,7 @@ The library exposes `window.expPrivacyGate`:
 | `expPrivacyGate.setTrackingConsent(payload, cb)` | Programmatically set consent |
 | `expPrivacyGate.scan()` | Manually trigger a DOM scan (useful after dynamic content injection) |
 | `expPrivacyGate.reset()` | Clear the "already ran" state so nodes can be re-executed |
+| `expPrivacyGate.status()` | Return the state of every gated node (`allowed`, `activated`, `blockedBy`) for debugging |
 
 ### Example: trigger after dynamic content injection
 
@@ -238,6 +262,27 @@ expPrivacyGate.scan()
 ```
 
 ---
+
+## Configuration globals
+
+Set these on `window` before the library boots:
+
+| Global | Effect |
+|---|---|
+| `EXP_PRIVACY_GATE_LOG_URL` | Override the fallback analytics log endpoint (default `/apps/exp/log`) |
+| `EXP_PRIVACY_GATE_DEBUG` | When truthy, log every gate decision (`run`, `blocked`, `revoked`) to the console |
+| `EXP_PRIVACY_GATE_FAIL_OPEN` | When truthy, allow non-necessary purposes if the Customer Privacy API is unavailable (default is **fail-closed** — block everything but `necessary`) |
+
+```html
+<script>
+  window.EXP_PRIVACY_GATE_DEBUG = true
+</script>
+```
+
+## TypeScript
+
+Type definitions ship with the package (`types/index.d.ts`) and describe the
+`window.expPrivacyGate` API and the configuration globals.
 
 ## Security notes
 

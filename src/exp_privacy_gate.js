@@ -10,6 +10,7 @@
   const ATTR_CROSSORIGIN = 'data-exp-crossorigin'
   const ATTR_NONCE = 'data-exp-nonce'
   const ATTR_RELOAD = 'data-exp-reload-on-revoke'
+  const ATTR_WHEN = 'data-exp-when'
   const DEFAULT_ONCE = '1'
   const DEFAULT_LOG_URL = '/apps/exp/log'
 
@@ -51,6 +52,11 @@
         body: JSON.stringify({ name, payload })
       }).catch(() => {})
     } catch (_) {}
+  }
+
+  const debug = (msg, info) => {
+    if (!window.EXP_PRIVACY_GATE_DEBUG) return
+    try { console.info('[exp-privacy-gate]', msg, info || '') } catch (_) {}
   }
 
   const norm = (v) => String(v || '').trim().toLowerCase()
@@ -105,6 +111,25 @@
     reset: () => {
       state.ran.clear()
       try { sessionStorage.removeItem(STORE_KEY) } catch (_) {}
+    },
+    // Introspect every gated node and why it is/isn't allowed. Handy for
+    // debugging consent issues from the console.
+    status: () => {
+      const list = []
+      try {
+        document.querySelectorAll(`[${ATTR}]`).forEach((el) => {
+          const purposes = parsePurposes(el.getAttribute(ATTR))
+          const allowed = allPurposesAllowed(purposes)
+          list.push({
+            element: el,
+            purposes,
+            allowed,
+            activated: !!el.__exp_activated,
+            blockedBy: allowed ? [] : purposes.filter((p) => !purposeAllowed(p))
+          })
+        })
+      } catch (_) {}
+      return list
     }
   }
 
@@ -117,7 +142,9 @@
     if (p === 'necessary') return true
 
     const api = getPrivacyApi()
-    if (!api) return false
+    // Fail-closed by default when the Customer Privacy API is unavailable.
+    // Opt into the legacy "allow when API absent" behaviour with a global flag.
+    if (!api) return !!window.EXP_PRIVACY_GATE_FAIL_OPEN
 
     try {
       if (p === 'preferences') return !!api.preferencesProcessingAllowed?.()
@@ -251,9 +278,54 @@
     }
 
     publish('exp_privacy_gate_revoked', { p: purposes })
+    debug('revoked', { purposes })
     if (el.hasAttribute(ATTR_RELOAD)) {
       try { location.reload() } catch (_) {}
     }
+  }
+
+  // Decide *when* an allowed node actually runs. Default is immediate; the
+  // data-exp-when attribute can defer it to browser idle time, until the node
+  // scrolls into view, or until the first user interaction — useful to keep
+  // non-critical gated scripts off the critical rendering path. Note that
+  // "visible" only fires for rendered elements (iframe/img), not <script> tags.
+  const schedule = (el, fn) => {
+    const when = norm(el.getAttribute(ATTR_WHEN))
+
+    if (when === 'idle') {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(fn, { timeout: 3000 })
+      } else {
+        setTimeout(fn, 0)
+      }
+      return
+    }
+
+    if (when === 'visible') {
+      if (typeof window.IntersectionObserver === 'function') {
+        const io = new IntersectionObserver((entries, obs) => {
+          for (const e of entries) {
+            if (e.isIntersecting) { obs.disconnect(); fn(); return }
+          }
+        })
+        io.observe(el)
+        return
+      }
+      fn()
+      return
+    }
+
+    if (when === 'interaction') {
+      const events = ['pointerdown', 'keydown', 'touchstart', 'scroll']
+      const handler = () => {
+        events.forEach((ev) => window.removeEventListener(ev, handler, true))
+        fn()
+      }
+      events.forEach((ev) => window.addEventListener(ev, handler, { capture: true, passive: true }))
+      return
+    }
+
+    fn()
   }
 
   const setFallback = (el, visible) => {
@@ -285,10 +357,17 @@
       // Consent is missing, or was withdrawn after the node had run.
       if (el.__exp_activated) revoke(el, purposes)
       setFallback(el, true)
+      // Emit once per blocked episode so the event isn't repeated on every scan.
+      if (!el.__exp_blocked) {
+        el.__exp_blocked = true
+        publish('exp_privacy_gate_blocked', { p: purposes })
+        debug('blocked', { purposes })
+      }
       return
     }
 
     // Consent granted — hide fallback
+    el.__exp_blocked = false
     setFallback(el, false)
 
     const k = nodeKey(el)
@@ -299,20 +378,31 @@
     // scans (boot, the customerPrivacy ready promise, visitorConsentCollected,
     // the storage event, the MutationObserver and the public scan()) could each
     // pass the alreadyRan() check before either reaches markRan() and inject the
-    // same script twice.
+    // same script twice. The marker is set synchronously here and released only
+    // once the (possibly deferred) run completes.
     if (state.inFlight.has(k)) return
     state.inFlight.add(k)
 
-    try {
-      await activate(el)
-      el.__exp_activated = true
-      if (shouldOnce(el)) markRan(k)
-      publish('exp_privacy_gate_run', { p: purposes })
-    } catch (_) {
-      publish('exp_privacy_gate_error', { p: purposes })
-    } finally {
-      state.inFlight.delete(k)
+    const runNode = async () => {
+      // Consent may have been withdrawn while the run was deferred.
+      if (!allPurposesAllowed(purposes)) {
+        state.inFlight.delete(k)
+        return
+      }
+      try {
+        await activate(el)
+        el.__exp_activated = true
+        if (shouldOnce(el)) markRan(k)
+        publish('exp_privacy_gate_run', { p: purposes })
+        debug('run', { purposes })
+      } catch (_) {
+        publish('exp_privacy_gate_error', { p: purposes })
+      } finally {
+        state.inFlight.delete(k)
+      }
     }
+
+    schedule(el, runNode)
   }
 
   const scan = async (root = document) => {

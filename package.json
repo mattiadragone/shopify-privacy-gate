@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "description": "Shopify Customer Privacy API gate to prevent scripts loading before consent.",
   "main": "dist/exp_privacy_gate.js",
+  "types": "types/index.d.ts",
   "files": [
     "dist",
     "src",
+    "types",
     "README.md",
     "LICENSE"
   ],
