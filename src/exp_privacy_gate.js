@@ -1,5 +1,6 @@
 (() => {
   const STORE_KEY = 'exp_privacy_gate_ran'
+  const SYNC_KEY = 'exp_privacy_gate_consent_sync'
   const ATTR = 'data-exp-privacy'
   const ATTR_SRC = 'data-exp-src'
   const ATTR_KIND = 'data-exp-kind'
@@ -288,12 +289,18 @@
   }
 
   const hookPrivacyChanges = () => {
-    // Re-scan when consent is collected/updated in the same tab
-    document.addEventListener('visitorConsentCollected', () => scan())
+    // Re-scan when consent is collected/updated in the same tab, and broadcast
+    // the change to other tabs. Shopify stores consent in a cookie (not in Web
+    // Storage), and the `storage` event never fires for cookie changes, so we
+    // need to write our own key to localStorage to propagate across tabs.
+    document.addEventListener('visitorConsentCollected', () => {
+      try { localStorage.setItem(SYNC_KEY, String(Date.now())) } catch (_) {}
+      scan()
+    })
 
-    // Re-scan when consent changes in another tab (sessionStorage/localStorage update)
+    // Re-scan when another tab broadcasts a consent change via the key above.
     window.addEventListener('storage', (e) => {
-      if (e.key && e.key.includes('consent')) scan()
+      if (e.key === SYNC_KEY) scan()
     })
   }
 
