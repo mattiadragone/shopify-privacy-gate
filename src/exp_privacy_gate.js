@@ -11,6 +11,7 @@
 
   const state = {
     ran: new Set(),
+    inFlight: new Set(),
     booted: false
   }
 
@@ -131,11 +132,29 @@
     return true
   }
 
+  // djb2-style string hash → short, stable, deterministic token
+  const hashString = (str) => {
+    let h = 5381
+    for (let i = 0; i < str.length; i += 1) {
+      h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0
+    }
+    return h.toString(36)
+  }
+
+  // Deduplication key. A manual `data-exp-key` always wins; otherwise the key
+  // is derived deterministically from the node's identifying attributes so it
+  // stays stable across page loads. This makes the once-per-session dedup work
+  // across navigations and prevents sessionStorage from growing unbounded with
+  // throwaway random keys.
   const nodeKey = (el) => {
     const explicit = el.getAttribute('data-exp-key')
     if (explicit) return explicit
     if (!el.__exp_privacy_gate_id) {
-      el.__exp_privacy_gate_id = 'n_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+      const src = el.getAttribute(ATTR_SRC) || ''
+      const kind = el.getAttribute(ATTR_KIND) || ''
+      const purposes = el.getAttribute(ATTR) || ''
+      const inline = src ? '' : (el.textContent || '')
+      el.__exp_privacy_gate_id = 'k_' + hashString(`${src}|${kind}|${purposes}|${inline}`)
     }
     return el.__exp_privacy_gate_id
   }
@@ -210,6 +229,15 @@
     const k = nodeKey(el)
     if (shouldOnce(el) && alreadyRan(k)) return
 
+    // Guard against double execution: loading an external script yields at the
+    // first `await`, so without a synchronous in-flight marker two concurrent
+    // scans (boot, the customerPrivacy ready promise, visitorConsentCollected,
+    // the storage event, the MutationObserver and the public scan()) could each
+    // pass the alreadyRan() check before either reaches markRan() and inject the
+    // same script twice.
+    if (state.inFlight.has(k)) return
+    state.inFlight.add(k)
+
     try {
       const src = el.getAttribute(ATTR_SRC)
       if (src) {
@@ -221,6 +249,8 @@
       publish('exp_privacy_gate_run', { p: purposes })
     } catch (_) {
       publish('exp_privacy_gate_error', { p: purposes })
+    } finally {
+      state.inFlight.delete(k)
     }
   }
 
