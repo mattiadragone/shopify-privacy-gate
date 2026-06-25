@@ -8,6 +8,8 @@
   const ATTR_FALLBACK = 'data-exp-fallback'
   const ATTR_INTEGRITY = 'data-exp-integrity'
   const ATTR_CROSSORIGIN = 'data-exp-crossorigin'
+  const ATTR_NONCE = 'data-exp-nonce'
+  const ATTR_RELOAD = 'data-exp-reload-on-revoke'
   const DEFAULT_ONCE = '1'
   const DEFAULT_LOG_URL = '/apps/exp/log'
 
@@ -182,6 +184,8 @@
     if (!code.trim()) return
     const s = document.createElement('script')
     s.type = 'text/javascript'
+    const nonce = el.getAttribute(ATTR_NONCE)
+    if (nonce) s.nonce = nonce
     s.text = code
     document.head.appendChild(s)
     s.remove()
@@ -199,15 +203,57 @@
       s.async = true
       const integrity = el.getAttribute(ATTR_INTEGRITY)
       const crossorigin = el.getAttribute(ATTR_CROSSORIGIN)
+      const nonce = el.getAttribute(ATTR_NONCE)
       if (integrity) s.integrity = integrity
       // Subresource Integrity requires a CORS request; default to anonymous
       // when an integrity hash is provided but no explicit mode is set.
       if (crossorigin) s.crossOrigin = crossorigin
       else if (integrity) s.crossOrigin = 'anonymous'
+      if (nonce) s.nonce = nonce
       s.onload = resolve
       s.onerror = reject
       document.head.appendChild(s)
     })
+  }
+
+  // Apply a gated node now that consent is granted. Scripts are executed
+  // (inline or external); embeds/pixels (iframe, img, link, or any element
+  // carrying data-exp-src) have their real source revealed by setting src/href.
+  const activate = async (el) => {
+    if (el.tagName === 'SCRIPT') {
+      const src = el.getAttribute(ATTR_SRC)
+      if (src) await runExternal(el, src)
+      else runInline(el)
+      return
+    }
+    const src = el.getAttribute(ATTR_SRC)
+    if (!src) return
+    if (el.tagName === 'LINK') el.href = src
+    else el.setAttribute('src', src)
+  }
+
+  // Undo a node when consent is missing or has been withdrawn. Embeds/pixels
+  // are torn down so they stop loading and setting cookies. An already-executed
+  // <script> cannot be unloaded — use data-exp-reload-on-revoke when stopping it
+  // really matters.
+  const revoke = (el, purposes) => {
+    el.__exp_activated = false
+    // Allow the node to run again if consent is granted later.
+    const k = nodeKey(el)
+    if (state.ran.delete(k)) writeRan()
+
+    const tag = el.tagName
+    if (tag === 'IFRAME') {
+      el.setAttribute('src', 'about:blank')
+    } else if (tag === 'IMG' || tag === 'LINK') {
+      el.removeAttribute('src')
+      el.removeAttribute('href')
+    }
+
+    publish('exp_privacy_gate_revoked', { p: purposes })
+    if (el.hasAttribute(ATTR_RELOAD)) {
+      try { location.reload() } catch (_) {}
+    }
   }
 
   const setFallback = (el, visible) => {
@@ -236,6 +282,8 @@
     if (!validatePurposes(purposes)) return
 
     if (!allPurposesAllowed(purposes)) {
+      // Consent is missing, or was withdrawn after the node had run.
+      if (el.__exp_activated) revoke(el, purposes)
       setFallback(el, true)
       return
     }
@@ -256,12 +304,8 @@
     state.inFlight.add(k)
 
     try {
-      const src = el.getAttribute(ATTR_SRC)
-      if (src) {
-        await runExternal(el, src)
-      } else {
-        runInline(el)
-      }
+      await activate(el)
+      el.__exp_activated = true
       if (shouldOnce(el)) markRan(k)
       publish('exp_privacy_gate_run', { p: purposes })
     } catch (_) {
