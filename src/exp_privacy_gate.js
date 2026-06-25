@@ -205,9 +205,14 @@
       const fallbackEl = document.querySelector(selector)
       if (!fallbackEl) return
       if (visible) {
-        fallbackEl.removeAttribute('hidden')
+        fallbackEl.hidden = false
+        // Defensively undo an inline display:none, otherwise it would win over
+        // removing the hidden attribute and the fallback would never appear.
+        if (fallbackEl.style && fallbackEl.style.display === 'none') {
+          fallbackEl.style.display = ''
+        }
       } else {
-        fallbackEl.setAttribute('hidden', '')
+        fallbackEl.hidden = true
       }
     } catch (_) {}
   }

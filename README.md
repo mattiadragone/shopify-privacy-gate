@@ -84,6 +84,13 @@ window.__expPrefsReady = true
 
 Show a message while analytics consent is not given. The fallback is hidden automatically once consent is granted.
 
+> **Initialize the fallback element with the `hidden` attribute.** The gate
+> shows it (removes `hidden`) only when consent is missing and hides it again
+> once consent is granted. Starting it hidden avoids a flash of the fallback
+> content before the gate has evaluated. Do **not** hide it with
+> `style="display:none"`: an inline `display` would win over the `hidden`
+> attribute (the gate clears it defensively, but `hidden` is the supported way).
+
 ```html
 <script type="application/json"
   data-exp-privacy="analytics"
@@ -91,7 +98,7 @@ Show a message while analytics consent is not given. The fallback is hidden auto
   data-exp-fallback="#analytics-blocked">
 </script>
 
-<div id="analytics-blocked">
+<div id="analytics-blocked" hidden>
   Analytics disabled.
   <a href="/pages/privacy">Manage your preferences</a>
 </div>
@@ -122,7 +129,7 @@ Show a message while analytics consent is not given. The fallback is hidden auto
   </script>
 </head>
 
-<div id="analytics-consent-notice" style="display:none">
+<div id="analytics-consent-notice" hidden>
   Analytics are disabled. <a href="/pages/privacy">Update preferences</a>
 </div>
 ```
