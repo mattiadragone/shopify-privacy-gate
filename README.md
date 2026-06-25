@@ -43,13 +43,15 @@ Unknown purposes are rejected (no download/execution) and trigger an `exp_privac
 | Attribute | Required | Default | Description |
 |---|---|---|---|
 | `data-exp-privacy` | ✅ | — | One or more purposes required before execution |
-| `data-exp-src` | — | — | URL of the external script to load |
-| `data-exp-kind` | — | `classic` | Set to `module` to load via ESM `import()` |
+| `data-exp-src` | — | — | URL of the external script to load, or the real source to reveal on a gated `<iframe>`/`<img>`/`<link>` |
+| `data-exp-kind` | — | `classic` | Set to `module` to load via ESM `import()` (scripts only) |
 | `data-exp-once` | — | `1` | Set to `0` to allow re-execution on every scan (see caveat below) |
 | `data-exp-key` | — | auto | Manual deduplication key (overrides the auto-generated one) |
 | `data-exp-fallback` | — | — | CSS selector of an element to show while consent is not given |
 | `data-exp-integrity` | — | — | Subresource Integrity hash for the external script (classic only) |
 | `data-exp-crossorigin` | — | auto | CORS mode for the external script; defaults to `anonymous` when an integrity hash is set |
+| `data-exp-nonce` | — | — | CSP nonce applied to the injected `<script>` (script nodes only) |
+| `data-exp-reload-on-revoke` | — | — | Reload the page if consent is withdrawn after the node has run |
 
 > **`data-exp-once="0"` caveat:** re-execution on every scan applies to classic
 > scripts and inline bootstraps. ESM modules (`data-exp-kind="module"`) are
@@ -84,6 +86,50 @@ Unknown purposes are rejected (no download/execution) and trigger an `exp_privac
 ```html
 <script type="application/json" data-exp-privacy="preferences">
 window.__expPrefsReady = true
+</script>
+```
+
+### Gating iframes, images and pixels
+
+The gate isn't limited to `<script>` tags. Put the attributes directly on an
+`<iframe>`, `<img>` or `<link>` and **leave its `src` empty** — the real URL goes
+in `data-exp-src` and is only applied once consent is granted, so nothing is
+requested before then.
+
+```html
+<!-- Cookieless until marketing consent: a YouTube embed -->
+<iframe
+  data-exp-privacy="marketing"
+  data-exp-src="https://www.youtube.com/embed/VIDEO_ID"
+  data-exp-fallback="#yt-blocked"
+  width="560" height="315" loading="lazy"></iframe>
+
+<div id="yt-blocked" hidden>Enable marketing cookies to watch this video.</div>
+
+<!-- Tracking pixel as an image -->
+<img data-exp-privacy="marketing,sale_of_data"
+  data-exp-src="https://pixel.example.com/p.gif" width="1" height="1" alt="">
+```
+
+### Consent revocation
+
+`visitorConsentCollected` also fires when a visitor **withdraws** consent. On the
+next scan the gate reacts:
+
+- **`<iframe>`** is reset to `about:blank`, **`<img>`/`<link>`** have their
+  `src`/`href` removed — so the embed/pixel stops loading and setting cookies;
+- an `exp_privacy_gate_revoked` event is published;
+- the node becomes eligible to run again if consent is later re-granted;
+- the fallback element (if any) is shown again.
+
+An already-executed `<script>` **cannot be unloaded**. When stopping it really
+matters, add `data-exp-reload-on-revoke` so the page reloads on withdrawal:
+
+```html
+<script type="application/json"
+  data-exp-privacy="analytics"
+  data-exp-src="https://cdn.example.com/tracker.js"
+  data-exp-reload-on-revoke>
 </script>
 ```
 
@@ -156,6 +202,7 @@ All events are published via `Shopify.analytics.publish` if available, otherwise
 | `exp_privacy_gate_run` | A gated node was successfully executed |
 | `exp_privacy_gate_error` | A gated node threw an error during execution |
 | `exp_privacy_gate_invalid_purpose` | An unknown purpose was specified |
+| `exp_privacy_gate_revoked` | A previously-run node was torn down because consent was withdrawn |
 
 ---
 
