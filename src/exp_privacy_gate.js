@@ -4,6 +4,7 @@
   const ATTR_SRC = 'data-exp-src'
   const ATTR_KIND = 'data-exp-kind'
   const ATTR_ONCE = 'data-exp-once'
+  const ATTR_FALLBACK = 'data-exp-fallback'
   const DEFAULT_ONCE = '1'
 
   const ALLOWED_PURPOSES = new Set(['necessary', 'preferences', 'analytics', 'marketing', 'sale_of_data', 'saleofdata'])
@@ -91,7 +92,12 @@
     consentId: () => apiState.p?.consentId?.(),
     currentVisitorConsent: () => apiState.p?.currentVisitorConsent?.() || null,
     shouldShowBanner: () => !!apiState.p?.shouldShowBanner?.(),
-    setTrackingConsent: (payload, cb) => apiState.p?.setTrackingConsent?.(payload, cb || (() => {}))
+    setTrackingConsent: (payload, cb) => apiState.p?.setTrackingConsent?.(payload, cb || (() => {})),
+    scan: () => scan(),
+    reset: () => {
+      state.ran.clear()
+      try { sessionStorage.removeItem(STORE_KEY) } catch (_) {}
+    }
   }
 
   const getPrivacyApi = () => apiState.p || (window.Shopify && window.Shopify.customerPrivacy) || null
@@ -173,12 +179,33 @@
     })
   }
 
+  const setFallback = (el, visible) => {
+    const selector = el.getAttribute(ATTR_FALLBACK)
+    if (!selector) return
+    try {
+      const fallbackEl = document.querySelector(selector)
+      if (!fallbackEl) return
+      if (visible) {
+        fallbackEl.removeAttribute('hidden')
+      } else {
+        fallbackEl.setAttribute('hidden', '')
+      }
+    } catch (_) {}
+  }
+
   const executeNode = async (el) => {
     const purposes = parsePurposes(el.getAttribute(ATTR))
     if (!purposes.length) return
 
     if (!validatePurposes(purposes)) return
-    if (!allPurposesAllowed(purposes)) return
+
+    if (!allPurposesAllowed(purposes)) {
+      setFallback(el, true)
+      return
+    }
+
+    // Consent granted — hide fallback
+    setFallback(el, false)
 
     const k = nodeKey(el)
     if (shouldOnce(el) && alreadyRan(k)) return
@@ -221,7 +248,7 @@
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: [ATTR, ATTR_SRC, ATTR_KIND, ATTR_ONCE]
+      attributeFilter: [ATTR, ATTR_SRC, ATTR_KIND, ATTR_ONCE, ATTR_FALLBACK]
     })
   }
 
